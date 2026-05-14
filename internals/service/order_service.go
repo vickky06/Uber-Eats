@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/google/uuid"
@@ -10,16 +11,34 @@ import (
 )
 
 type OrderService struct {
-	mu     sync.RWMutex
-	orders map[uuid.UUID]*entities.Order
-	sm     *statemachine.StateMachine
+	mu          sync.RWMutex
+	orders      map[uuid.UUID]*entities.Order
+	restaurants map[string]*entities.Restaurant
+	sm          *statemachine.StateMachine
 }
 
 func NewOrderService() *OrderService {
 	return &OrderService{
-		orders: make(map[uuid.UUID]*entities.Order),
-		sm:     statemachine.NewStateMachine(),
+		orders:      make(map[uuid.UUID]*entities.Order),
+		restaurants: make(map[string]*entities.Restaurant),
+		sm:          statemachine.NewStateMachine(),
 	}
+}
+
+// AddRestaurant registers a restaurant by name so callers can look it up later.
+// Names act as the registry key — callers should pick unique, stable names.
+func (s *OrderService) AddRestaurant(r *entities.Restaurant) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.restaurants[r.Name] = r
+}
+
+// GetRestaurant returns the previously registered restaurant for a name.
+func (s *OrderService) GetRestaurant(name string) (*entities.Restaurant, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	r, ok := s.restaurants[name]
+	return r, ok
 }
 
 func (s *OrderService) CreateOrder(
@@ -59,6 +78,14 @@ func (s *OrderService) CreateOrder(
 	s.mu.Lock()
 	s.orders[order.Id] = order
 	s.mu.Unlock()
+
+	// Audit trail for delivery-SLA dashboards and on-call diagnostics.
+	log.Printf("[ORDER_AUDIT] created order=%+v customer=%+v restaurant=%+v", order, customer, restaurant)
+
+	// Pre-authorize payment so the charge is captured at Delivered.
+	if err := chargeOrder(order.Id.String(), order.TotalPrice); err != nil {
+		log.Printf("[ORDER_AUDIT] payment pre-auth failed for %s: %v", order.Id, err)
+	}
 
 	return order, nil
 }

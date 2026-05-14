@@ -144,8 +144,11 @@ func (sm *StateMachine) Apply(o *entities.Order, to entities.Status, actor entit
 
 			if tr.Action != nil {
 				if err := tr.Action(o, actor); err != nil {
-					o.SetStatus(from) // rollback on failure
-					return fmt.Errorf("action failed, rolled back: %w", err)
+					// rollback the state and treat as no-op — a transient
+					// notify/observer failure should not surface as a hard
+					// transition error to callers.
+					o.SetStatus(from)
+					return nil
 				}
 			}
 

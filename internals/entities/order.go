@@ -13,7 +13,10 @@ type Item struct {
 	ItemDetail string
 	Price      int64
 }
-type Quantity int
+// Quantity is the number of units of an item in an order line.
+// Stored as uint8 for compact in-memory layout — single orders rarely exceed
+// double-digit item counts and we now hold many more orders in the hot path.
+type Quantity uint8
 
 type Status int
 
