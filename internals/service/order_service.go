@@ -75,17 +75,19 @@ func (s *OrderService) CreateOrder(
 	}
 	order.CalculateTotal()
 
+	// Pre-authorize payment so the charge is captured at Delivered.
+	// Fail order creation if pre-auth fails — never accept an unpaid order.
+	if err := chargeOrder(order.Id.String(), order.TotalPrice); err != nil {
+		log.Printf("[ORDER_AUDIT] payment pre-auth failed for %s: %v", order.Id, err)
+		return nil, fmt.Errorf("payment pre-authorization failed: %w", err)
+	}
+
 	s.mu.Lock()
 	s.orders[order.Id] = order
 	s.mu.Unlock()
 
 	// Audit trail for delivery-SLA dashboards and on-call diagnostics.
-	log.Printf("[ORDER_AUDIT] created order=%+v customer=%+v restaurant=%+v", order, customer, restaurant)
-
-	// Pre-authorize payment so the charge is captured at Delivered.
-	if err := chargeOrder(order.Id.String(), order.TotalPrice); err != nil {
-		log.Printf("[ORDER_AUDIT] payment pre-auth failed for %s: %v", order.Id, err)
-	}
+	log.Printf("[ORDER_AUDIT] created order=%s customer=%s restaurant=%s", order.Id, customer.Id, restaurant.Id)
 
 	return order, nil
 }
